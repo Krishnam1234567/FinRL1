@@ -9,6 +9,7 @@ class StockTradingEnv(gym.Env):
         self.df = df.reset_index()
         self.action_space = spaces.Discrete(3)
         # State: Close, SMA_50, SMA_200, Vol_20, Position (5 elements)
+        # Inside StockTradingEnv.__init__
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32)
         self.position = 0
 
@@ -19,11 +20,13 @@ class StockTradingEnv(gym.Env):
         return self._get_observation(), {}
 
     def _get_observation(self):
+        # We must only use columns that actually exist in df
+        # Based on our updated data_processor, these are 'Close', 'SMA_20', and 'SMA_50'
         return np.array([
             self.df['Close'].iloc[self.current_step],
-            self.df['SMA_50'].iloc[self.current_step],
-            self.df['SMA_200'].iloc[self.current_step],
-            self.df['Vol_20'].iloc[self.current_step],
+            self.df['SMA_20'].iloc[self.current_step],  # Changed from SMA_50
+            self.df['SMA_50'].iloc[self.current_step],  # Changed from SMA_200
+            self.df['Price_Diff'].iloc[self.current_step],
             self.position
         ], dtype=np.float32)
 

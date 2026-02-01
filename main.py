@@ -1,65 +1,39 @@
 import os
-import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-# Import your custom modules
-from src.data_processor import get_clean_data
+# Custom Imports
+from src.data_processor import get_automated_data
 from src.environment import StockTradingEnv
+from src.backtester import run_pro_backtest
 
 
 def main():
-    # 1. Folders for organization
     os.makedirs("models", exist_ok=True)
-    os.makedirs("logs", exist_ok=True)
+    TICKER = "BTC-USD"
 
-    # 2. Load and Split Data
-    print("--- Loading Data ---")
-    file_path = "data/btcusd_1-min_data (2).csv"
-    df = get_clean_data(file_path)
-
+    # 1. Training Phase
+    df = get_automated_data(ticker=TICKER, start="2023-01-01", end="2026-02-01")
     split = int(len(df) * 0.8)
     train_df = df.iloc[:split]
-    test_df = df.iloc[split:]
 
-    # 3. Initialize Training Environment
-    env = DummyVecEnv([lambda: StockTradingEnv(train_df)])
+    train_env = DummyVecEnv([lambda: StockTradingEnv(train_df)])
+    model = PPO("MlpPolicy", train_env, verbose=1)
 
-    # 4. Define and Train Model
-    # We use MlpPolicy because our data is a simple feature vector
-    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./logs/", learning_rate=0.0003)
+    print("--- Starting Training ---")
+    model.learn(total_timesteps=100000)
 
-    print("--- Training RL Agent (200,000 steps) ---")
-    model.learn(total_timesteps=200000)
-    model.save("models/ppo_nifty_final")
+    model_path = f"models/ppo_{TICKER.replace('^', '')}_2026"
+    model.save(model_path)
+    print(f"Model Saved at {model_path}!")
 
-    # 5. Testing / Backtesting
-    print("--- Running Backtest on Test Data ---")
-    test_env = StockTradingEnv(test_df)
-    obs, _ = test_env.reset()
+    # 2. Automated Backtesting Phase (Using the Module)
+    print("--- Starting Automated Backtest ---")
+    sharpe = run_pro_backtest(ticker=TICKER, model_path=model_path)
 
-    signals = []
-    for _ in range(len(test_df) - 1):
-        action, _ = model.predict(obs, deterministic=True)
-        obs, reward, done, truncated, info = test_env.step(action)
-        signals.append(test_env.position)
-
-    # 6. Performance Visualization
-    results = test_df.iloc[:len(signals)].copy()
-    results['Signal'] = signals
-    results['Market_Ret'] = results['Close'].pct_change().fillna(0)
-    results['Strategy_Ret'] = results['Market_Ret'] * results['Signal'].shift(1).fillna(0)
-
-    results['Cum_Market'] = (1 + results['Market_Ret']).cumprod()
-    results['Cum_Strategy'] = (1 + results['Strategy_Ret']).cumprod()
-
-    plt.figure(figsize=(12, 5))
-    plt.plot(results['Cum_Market'], label='Market (Buy & Hold)', color='black', linestyle='--')
-    plt.plot(results['Cum_Strategy'], label='RL Strategy', color='blue')
-    plt.title("PPO Agent vs Nifty 50 Market Performance")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    print(f"Workflow Complete!")
+    print(f"Final Sharpe Ratio: {sharpe:.2f}")
+    print(f"Performance Chart: results/backtest_{TICKER.replace('^', '')}.png")
 
 
 if __name__ == "__main__":

@@ -1,24 +1,52 @@
+# backtesting.py
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 import os
 from stable_baselines3 import PPO
-from src.data_processor import get_clean_data
 from src.environment import StockTradingEnv
+from src.data_processor import get_automated_data
 
-# Create folders if they don't exist
-os.makedirs("models", exist_ok=True)
 
-# 1. Prepare Data
-df = get_clean_data("data/btcusd_1-min_data (2).csv")
-split = int(len(df) * 0.8)
-train_df, test_df = df.iloc[:split], df.iloc[split:]
+def run_pro_backtest(ticker="^NSEI", model_path=None):
+    if model_path is None:
+        model_path = f"models/ppo_{ticker.replace('^', '')}_2026"
 
-# 2. Setup Environments
-train_env = StockTradingEnv(train_df)
+    # 1. Load Model & Data
+    model = PPO.load(model_path)
+    df = get_automated_data(ticker=ticker, start="2023-01-01", end="2026-02-01")
 
-# 3. Initialize & Train Agent
-model = PPO("MlpPolicy", train_env, verbose=1, tensorboard_log="./logs/")
-print("Starting Training...")
-model.learn(total_timesteps=200000)
+    # Isolate test data (final 20%)
+    split = int(len(df) * 0.8)
+    test_df = df.iloc[split:].copy()
 
-# 4. Save the Model
-model.save("models/ppo_nifty_model")
-print("Model Saved!")
+    env = StockTradingEnv(test_df)
+    obs, _ = env.reset()
+
+    # 2. Simulation Loop
+    signals = []
+    for _ in range(len(test_df) - 1):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, _, done, _, _ = env.step(action)
+        signals.append(env.position)
+
+    # 3. Metrics Calculation (Sharpe Ratio)
+    results = test_df.iloc[:len(signals)].copy()
+    results['Signal'] = signals
+    results['Market_Return'] = results['Close'].pct_change().fillna(0)
+    results['Strategy_Return'] = results['Market_Return'] * results['Signal'].shift(1).fillna(0)
+
+    # Sharpe Ratio: sqrt(252) * (mean / std)
+    sharpe = np.sqrt(252) * (results['Strategy_Return'].mean() / (results['Strategy_Return'].std() + 1e-9))
+
+    # 4. Save PNG Report
+    os.makedirs("results", exist_ok=True)
+    plt.figure(figsize=(12, 6))
+    plt.plot((1 + results['Strategy_Return']).cumprod(), label='RL Strategy', color='blue')
+    plt.plot((1 + results['Market_Return']).cumprod(), label='Market', color='black', alpha=0.3)
+    plt.title(f"Backtest for {ticker} | Sharpe: {sharpe:.2f}")
+    plt.legend()
+    plt.savefig(f"results/backtest_{ticker.replace('^', '')}.png")
+    plt.close()  # Close to free memory
+
+    return sharpe
