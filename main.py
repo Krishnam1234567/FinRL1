@@ -10,18 +10,18 @@ from src.backtester import run_pro_backtest
 
 def main():
     os.makedirs("models", exist_ok=True)
-    TICKER = "BTC-USD"
+    TICKER = "TCS.NS"
 
     # 1. Training Phase
-    df = get_automated_data(ticker=TICKER, start="2023-01-01", end="2026-02-01")
-    split = int(len(df) * 0.8)
+    df = get_automated_data(ticker=TICKER, start="2021-01-01", end="2026-02-01")
+    split = int(len(df) * 0.6)
     train_df = df.iloc[:split]
 
     train_env = DummyVecEnv([lambda: StockTradingEnv(train_df)])
     model = PPO("MlpPolicy", train_env, verbose=1)
 
     print("--- Starting Training ---")
-    model.learn(total_timesteps=100000)
+    model.learn(total_timesteps=5000)
 
     model_path = f"models/ppo_{TICKER.replace('^', '')}_2026"
     model.save(model_path)
